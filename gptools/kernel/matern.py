@@ -508,12 +508,11 @@ class Matern52Kernel(Kernel):
 
 
 class BetaWarpedMatern52Kernel(Kernel):
-    r"""Matern 5/2 covariance kernel. Supports only 0th and 1st derivatives
-    and is fixed at nu=5/2. Because of these limitations, it is quite a bit
-    faster than the more general Matern kernels.
+    r"""Non-stationary BetaCDF-warped Matern 5/2 covariance kernel.
+    This kernel does not support derivative observations.
 
-    The Matern52 kernel has the following hyperparameters, always referenced in
-    the order listed:
+    The BetaWarpedMatern52 kernel has the following hyperparameters,
+    always referenced in the order listed:
 
     = =====  ====================================
     0 sigma  prefactor
@@ -533,6 +532,9 @@ class BetaWarpedMatern52Kernel(Kernel):
 
         w_d(x) = \BetaCDF(x, \alpha_d, \beta_d)
 
+    Some properties and applications of this kernel are described in Snoek et
+    al. [1].
+
     Parameters
     ----------
     num_dim : int
@@ -549,6 +551,11 @@ class BetaWarpedMatern52Kernel(Kernel):
         vectors are inconsistent.
     GPArgumentError
         If `fixed_params` is passed but `initial_params` is not.
+
+    References
+    ----------
+    .. [1] J. Snoek, K. Swersky, R. Zemel, R. P. Adams, "Input Warping for
+       Bayesian Optimization of Non-stationary Functions" ICML (2014(
     """
     def __init__(self, num_dim=1, **kwargs):
         param_names = [r'\sigma_f']
