@@ -1,17 +1,17 @@
 # Copyright 2014 Mark Chilenski
 # This program is distributed under the terms of the GNU General Purpose License (GPL).
 # Refer to http://www.gnu.org/licenses/gpl.txt
-# 
+#
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -23,7 +23,9 @@ from __future__ import division
 from .core import ChainRuleKernel, ArbitraryKernel, Kernel
 from ..utils import generate_set_partitions
 from ._matern import _matern52
+from .warping import betacdf_warp
 
+import inspect
 import scipy
 import scipy.special
 import warnings
@@ -35,25 +37,25 @@ except ImportError:
 
 def matern_function(Xi, Xj, *args):
     r"""Matern covariance function of arbitrary dimension, for use with :py:class:`ArbitraryKernel`.
-    
+
     The Matern kernel has the following hyperparameters, always referenced in
     the order listed:
-    
+
     = ===== ====================================
     0 sigma prefactor
     1 nu    order of kernel
     2 l1    length scale for the first dimension
     3 l2    ...and so on for all dimensions
     = ===== ====================================
-    
+
     The kernel is defined as:
-    
+
     .. math::
-    
+
         k_M = \sigma^2 \frac{2^{1-\nu}}{\Gamma(\nu)}
         \left (\sqrt{2\nu \sum_i\left (\frac{\tau_i^2}{l_i^2}\right )}\right )^\nu
         K_\nu\left(\sqrt{2\nu \sum_i\left(\frac{\tau_i^2}{l_i^2}\right)}\right)
-    
+
     Parameters
     ----------
     Xi, Xj : :py:class:`Array`, :py:class:`mpf`, tuple or scalar float
@@ -65,12 +67,12 @@ def matern_function(Xi, Xj, *args):
     """
     num_dim = len(args) - 2
     nu = args[1]
-    
+
     if isinstance(Xi, scipy.ndarray):
         if isinstance(Xi, scipy.matrix):
             Xi = scipy.asarray(Xi, dtype=float)
             Xj = scipy.asarray(Xj, dtype=float)
-        
+
         tau = scipy.asarray(Xi - Xj, dtype=float)
         l_mat = scipy.tile(args[-num_dim:], (tau.shape[0], 1))
         r2l2 = scipy.sum((tau / l_mat)**2, axis=1)
@@ -93,25 +95,25 @@ def matern_function(Xi, Xj, *args):
 
 class MaternKernelArb(ArbitraryKernel):
     r"""Matern covariance kernel. Supports arbitrary derivatives. Treats order as a hyperparameter.
-    
+
     This version of the Matern kernel is painfully slow, but uses :py:mod:`mpmath`
     to ensure the derivatives are computed properly, since there may be issues
     with the regular :py:class:`MaternKernel`.
-    
+
     The Matern kernel has the following hyperparameters, always referenced in
     the order listed:
-    
+
     = ===== ====================================
     0 sigma prefactor
     1 nu    order of kernel
     2 l1    length scale for the first dimension
     3 l2    ...and so on for all dimensions
     = ===== ====================================
-    
+
     The kernel is defined as:
-    
+
     .. math::
-    
+
         k_M = \sigma^2 \frac{2^{1-\nu}}{\Gamma(\nu)}
         \left (\sqrt{2\nu \sum_i\left (\frac{\tau_i^2}{l_i^2}\right )}\right )^\nu
         K_\nu\left(\sqrt{2\nu \sum_i\left(\frac{\tau_i^2}{l_i^2}\right)}\right)
@@ -127,7 +129,7 @@ class MaternKernelArb(ArbitraryKernel):
                                               num_params=2 + kwargs.get('num_dim', 1),
                                               param_names=param_names,
                                               **kwargs)
-    
+
     @property
     def nu(self):
         r"""Returns the value of the order :math:`\nu`.
@@ -137,21 +139,21 @@ class MaternKernelArb(ArbitraryKernel):
 
 class MaternKernel(ChainRuleKernel):
     r"""Matern covariance kernel. Supports arbitrary derivatives. Treats order as a hyperparameter.
-    
+
     The Matern kernel has the following hyperparameters, always referenced in
     the order listed:
-    
+
     = ===== ====================================
     0 sigma prefactor
     1 nu    order of kernel
     2 l1    length scale for the first dimension
     3 l2    ...and so on for all dimensions
     = ===== ====================================
-    
+
     The kernel is defined as:
-    
+
     .. math::
-    
+
         k_M = \sigma^2 \frac{2^{1-\nu}}{\Gamma(\nu)}
         \left (\sqrt{2\nu \sum_i\left (\frac{\tau_i^2}{l_i^2}\right )}\right )^\nu
         K_\nu\left(\sqrt{2\nu \sum_i\left(\frac{\tau_i^2}{l_i^2}\right)}\right)
@@ -179,15 +181,15 @@ class MaternKernel(ChainRuleKernel):
                                            num_params=num_dim + 2,
                                            param_names=param_names,
                                            **kwargs)
-    
+
     def _compute_k(self, tau):
         r"""Evaluate the kernel directly at the given values of `tau`.
-        
+
         Parameters
         ----------
         tau : :py:class:`Matrix`, (`M`, `N`)
             `M` inputs with dimension `N`.
-        
+
         Returns
         -------
         k : :py:class:`Array`, (`M`,)
@@ -197,10 +199,10 @@ class MaternKernel(ChainRuleKernel):
         k = 2.0**(1 - self.nu) / scipy.special.gamma(self.nu) * y**self.nu * scipy.special.kv(self.nu, y)
         k[r2l2 == 0] = 1
         return k
-    
+
     def _compute_y(self, tau, return_r2l2=False):
         r"""Covert tau to :math:`y=\sqrt{2\nu\sum_i(\tau_i^2/l_i^2)}`.
-        
+
         Parameters
         ----------
         tau : :py:class:`Matrix`, (`M`, `N`)
@@ -208,7 +210,7 @@ class MaternKernel(ChainRuleKernel):
         return_r2l2 : bool, optional
             Set to True to return a tuple of (`y`, `r2l2`). Default is False
             (only return `y`).
-        
+
         Returns
         -------
         y : :py:class:`Array`, (`M`,)
@@ -222,53 +224,53 @@ class MaternKernel(ChainRuleKernel):
             return (y, r2l2)
         else:
             return y
-    
+
     def _compute_y_wrapper(self, *args):
         r"""Convert tau to :math:`y=\sqrt{2\nu\sum_i(\tau_i^2/l_i^2)}`.
-        
+
         Takes `tau` as an argument list for compatibility with :py:func:`mpmath.diff`.
-        
+
         Parameters
         ----------
         tau[0] : scalar float
             First element of `tau`.
         tau[1] : And so on...
-        
+
         Returns
         -------
         y : scalar float
             Inner part of Matern kernel at the given `tau`.
         """
         return self._compute_y(scipy.atleast_2d(scipy.asarray(args, dtype=float)))
-    
+
     def _compute_dk_dy(self, y, n):
         r"""Evaluate the derivative of the outer form of the Matern kernel.
-        
+
         Uses the general Leibniz rule to compute the n-th derivative of:
-        
+
         .. math::
-        
+
             f(y) = \frac{2^{1-\nu}}{\Gamma(\nu)} y^\nu K_\nu(y)
-        
+
         Notice that this is very poorly-behaved at :math:`x=0`. There, the
         value is approximated using :py:func:`mpmath.diff` with the `singular`
         keyword. This is rather slow, so if you require a fixed value of `nu`
         you may wish to consider implementing the appropriate kernel separately.
-        
+
         Parameters
         ----------
         y : :py:class:`Array`, (`M`,)
             `M` inputs to evaluate at.
         n : non-negative scalar int.
             Order of derivative to compute.
-        
+
         Returns
         -------
         dk_dy : :py:class:`Array`, (`M`,)
             Specified derivative at specified locations.
         """
         warnings.warn("The Matern kernel has not been verified for derivatives. Consider using MaternKernelArb.")
-        
+
         dk_dy = scipy.zeros_like(y, dtype=float)
         non_zero_idxs = (y != 0)
         for k in xrange(0, n + 1):
@@ -276,7 +278,7 @@ class MaternKernel(ChainRuleKernel):
                                      scipy.special.poch(1 - k + self.nu, k) *
                                      (y[non_zero_idxs])**(-k + self.nu) *
                                      scipy.special.kvp(self.nu, y[non_zero_idxs], n=n-k))
-        
+
         # Handle the cases at y=0.
         # Compute the appropriate value using mpmath's arbitrary precision
         # arithmetic. This is potentially slow, but seems to behave pretty
@@ -284,7 +286,7 @@ class MaternKernel(ChainRuleKernel):
         # (but still finite) floats are returned with the appropriate sign.
         if n >= 2 * self.nu:
             warnings.warn("n >= 2*nu can yield inaccurate results.", RuntimeWarning)
-        
+
         # Use John Wright's expression for n < 2 * nu:
         if n < 2.0 * self.nu:
             if n % 2 == 1:
@@ -302,20 +304,20 @@ class MaternKernel(ChainRuleKernel):
             core_expr = lambda x: x**self.nu * mpmath.besselk(self.nu, x)
             deriv = mpmath.chop(mpmath.diff(core_expr, 0, n=n, singular=True, direction=1))
             dk_dy[~non_zero_idxs] = deriv
-        
+
         dk_dy *= 2.0**(1 - self.nu) / (scipy.special.gamma(self.nu))
-        
-        return dk_dy  
-    
+
+        return dk_dy
+
     def _compute_dy_dtau(self, tau, b, r2l2):
         r"""Evaluate the derivative of the inner argument of the Matern kernel.
-        
+
         Uses Faa di Bruno's formula to take the derivative of
-        
+
         .. math::
-        
+
             y = \sqrt{2 \nu \sum_i(\tau_i^2 / l_i^2)}
-        
+
         Parameters
         ----------
         tau : :py:class:`Matrix`, (`M`, `N`)
@@ -324,7 +326,7 @@ class MaternKernel(ChainRuleKernel):
             Block specifying derivatives to be evaluated.
         r2l2 : :py:class:`Array`, (`M`,)
             Precomputed anisotropically scaled distance.
-        
+
         Returns
         -------
         dy_dtau: :py:class:`Array`, (`M`,)
@@ -335,7 +337,7 @@ class MaternKernel(ChainRuleKernel):
         non_zero_idxs = (r2l2 != 0)
         for p in deriv_partitions:
             dy_dtau[non_zero_idxs] += self._compute_dy_dtau_on_partition(tau[non_zero_idxs], p, r2l2[non_zero_idxs])
-        
+
         # Case at tau=0 is handled with mpmath for now.
         # TODO: This is painfully slow! Figure out how to do this analytically!
         derivs = scipy.zeros(tau.shape[1], dtype=int)
@@ -351,20 +353,20 @@ class MaternKernel(ChainRuleKernel):
             )
         )
         return dy_dtau
-    
+
     def _compute_dy_dtau_on_partition(self, tau, p, r2l2):
         """Evaluate the term inside the sum of Faa di Bruno's formula for the given partition.
-        
+
         Parameters
         ----------
         tau : :py:class:`Matrix`, (`M`, `N`)
             `M` inputs with dimension `N`.
         p : list of :py:class:`Array`
             Each element is a block of the partition representing the derivative
-            orders to use.    
+            orders to use.
         r2l2 : :py:class:`Array`, (`M`,)
             Precomputed anisotropically scaled distance.
-        
+
         Returns
         -------
         dy_dtau : :py:class:`Array`, (`M`,)
@@ -378,19 +380,19 @@ class MaternKernel(ChainRuleKernel):
                    (r2l2)**(-n + 0.5))
         for b in p:
             dy_dtau *= self._compute_dT_dtau(tau, b)
-        
+
         return dy_dtau
-    
+
     def _compute_dT_dtau(self, tau, b):
         r"""Evaluate the derivative of the :math:`\tau^2` sum term.
-        
+
         Parameters
         ----------
             tau : :py:class:`Matrix`, (`M`, `N`)
                 `M` inputs with dimension `N`.
             b : :py:class:`Array`, (`P`,)
                 Block specifying derivatives to be evaluated.
-        
+
         Returns
         -------
         dT_dtau : :py:class:`Array`, (`M`,)
@@ -408,7 +410,7 @@ class MaternKernel(ChainRuleKernel):
                 # len(b) == 2 is the only other possibility here because of
                 # the first test.
                 return 2.0 / (self.params[2 + tau_idx])**2.0 * scipy.ones(tau.shape[0])
-    
+
     @property
     def nu(self):
         r"""Returns the value of the order :math:`\nu`.
@@ -504,3 +506,77 @@ class Matern52Kernel(Kernel):
 
         value = _matern52(Xi, Xj, ni, nj, var)
         return self.params[0]**2 * value
+
+
+class WarpedKernel(Kernel):
+    def __init__(self, num_dim, **kwargs):
+        super(WarpedKernel, self).__init__(num_dim=num_dim, **kwargs)
+
+    def __call__(self, Xi, Xj, ni, nj, hyper_deriv=None, symmetric=False):
+
+        Xi = scipy.asarray(Xi, dtype=float)
+        Xj = scipy.asarray(Xj, dtype=float)
+
+        wXi = scipy.empty_like(Xi)
+        wXj = scipy.empty_like(Xj)
+        for i in range(self.num_dim):
+            wXi[:, i] = self._warp_func(Xi[:, i], 0, *self._warp_params(i))
+            wXj[:, i] = self._warp_func(Xj[:, i], 0, *self._warp_params(i))
+
+        k_term = self._kernel_func(wXi, wXj, ni, nj, *self._kernel_params())
+
+        warp_deriv = scipy.ones_like(k_term)
+        for d in range(self.num_dim):
+            term_i = self._warp_func(Xi[:,d], ni[:,d], *self._warp_params(d))
+            term_j = self._warp_func(Xj[:,d], nj[:,d], *self._warp_params(d))
+            term_i[ni[:,d] == 0] = 1
+            term_j[nj[:,d] == 0] = 1
+            warp_deriv *= (term_i * term_j)
+
+        return self.params[0]**2 * k_term * warp_deriv
+
+    def _kernel_func(self, Xi, Xj, ni, nj, *kernel_params):
+        raise NotImplementedError()
+
+    def _kernel_params(self):
+        raise NotImplementedError()
+
+    def _warp_func(self, Xi, ni, *warp_parms):
+        raise NotImplementedError()
+
+    def _warp_params(self, dim):
+        raise NotImplementedError()
+
+
+class Matern52KernelBetaCDF(WarpedKernel):
+    def __init__(self, num_dim=1, **kwargs):
+        param_names = [r'\sigma_f']
+        for i in range(num_dim):
+            param_names.extend([
+                'l_%d' % (i+1,),
+                'alpha_%d' % (i+1,),
+                'beta_%d' % (i+1,)
+            ])
+
+        super(Matern52KernelBetaCDF, self).__init__(
+            num_dim=num_dim, num_params=len(param_names),
+            param_names=param_names, **kwargs)
+
+    def _kernel_func(self, Xi, Xj, ni, nj, l):
+        if scipy.any(scipy.sum(ni, axis=1) > 1) or scipy.any(scipy.sum(nj, axis=1) > 1):
+            raise ValueError("Matern52Kernel only supports 0th and 1st order derivatives")
+        var = scipy.square(l)
+        Xi = scipy.asarray(Xi, dtype=float, order='c')
+        Xj = scipy.asarray(Xj, dtype=float, order='c')
+        ni = scipy.array(ni, dtype=scipy.int32, order='c')
+        nj = scipy.array(nj, dtype=scipy.int32, order='c')
+        return _matern52(Xi, Xj, ni, nj, var)
+
+    def _kernel_params(self):
+        return (self.params[1::3], )
+
+    def _warp_func(self, x, n, alpha, beta):
+        return betacdf_warp(x, n, alpha, beta)
+
+    def _warp_params(self, dim):
+        return (self.params[2 + 3*dim], self.params[3 + 3*dim])

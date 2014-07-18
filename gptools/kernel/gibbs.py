@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Provides classes and functions for creating SE kernels with warped length scales.
+"""Provides classes for squared exponential kernels with warped length scales.
 """
 
 from __future__ import division
