@@ -2,6 +2,8 @@ import numpy as np
 from scipy.optimize import check_grad
 from gptools.kernel.warping import betacdf_warp
 from numpy.testing import assert_raises
+from gptools.kernel import BetaCDFWarpedMatern52Kernel, Matern52Kernel
+
 random = np.random.RandomState(0)
 
 def test_1():
@@ -66,8 +68,6 @@ def test_4():
         result[:,1])
 
 
-from gptools.kernel import Matern52KernelBetaCDF, Matern52Kernel
-
 def test_5():
     # set alpha=beta=1 in Matern52KernelBetaCDF, and check that
     # its the same as Matern52Kernel
@@ -108,7 +108,7 @@ def test_6():
 def test_7():
     # finite-difference verification of Matern52KernelBetaCDF
     # derivatives in 2D
-    k1 = Matern52KernelBetaCDF(num_dim=2)
+    k1 = BetaCDFWarpedMatern52Kernel(num_dim=2)
     k1.params = np.array([1,   2, 3, 4,   0.2, 0.3, 0.4], dtype=float)
     y = np.array([[0.2, 0.3]])
 

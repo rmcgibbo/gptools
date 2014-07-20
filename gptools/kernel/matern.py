@@ -20,8 +20,9 @@
 
 from __future__ import division
 
+
 from .core import ChainRuleKernel, ArbitraryKernel, Kernel
-from ..utils import generate_set_partitions
+from ..utils import generate_set_partitions, unique_rows
 from ._matern import _matern52
 from .warping import betacdf_warp
 
@@ -34,6 +35,7 @@ try:
 except ImportError:
     warnings.warn("Could not import mpmath. Certain functions of the Matern kernel will not function.",
                   ImportWarning)
+
 
 def matern_function(Xi, Xj, *args):
     r"""Matern covariance function of arbitrary dimension, for use with :py:class:`ArbitraryKernel`.
@@ -496,7 +498,7 @@ class Matern52Kernel(Kernel):
         if hyper_deriv is not None:
             raise NotImplementedError("Hyperparameter derivatives have not been implemented!")
         if scipy.any(scipy.sum(ni, axis=1) > 1) or scipy.any(scipy.sum(nj, axis=1) > 1):
-            raise ValueError("Matern52Kernel only supports 0th and 1st order derivatives")
+            raise NotImplementedError("Matern52Kernel only supports 0th and 1st order derivatives")
 
         Xi = scipy.asarray(Xi, dtype=scipy.float64)
         Xj = scipy.asarray(Xj, dtype=scipy.float64)
@@ -508,47 +510,150 @@ class Matern52Kernel(Kernel):
         return self.params[0]**2 * value
 
 
-class WarpedKernel(Kernel):
-    def __init__(self, num_dim, **kwargs):
-        super(WarpedKernel, self).__init__(num_dim=num_dim, **kwargs)
+class WarpedMatern52Kernel(Kernel):
+    r"""Abstract base class for Matern52Kernel with a warping function applied
+    to the coordinates
+
+    The kernel is defined as:
+
+    .. math::
+
+        k_M(x, x') = \sigma^2 \left(1 + \sqrt{5r^2} + \frac{5}{3}r^2\right) \exp(-\sqrt{5r^2}) \\
+        r^2 = \sum_{d=1}^D \frac{(w_d(x_d) - w_d(x'_d))^2}{l_d^2}
+
+    where :math:`w_d (x)` is the warping function for the d-th dimension, which
+    must be defined by a concrete subclass.
+
+    Parameters
+    ----------
+    num_dim : int
+        Number of dimensions of the input data. Must be consistent with the `X`
+        and `Xstar` values passed to the :py:class:`~gptools.gaussian_process.GaussianProcess`
+        you wish to use the covariance kernel with.
+
+    length_scale_param_indices : array-like of int, shape=(length num_dim,)
+        To evaluate the Matern function, this base class needs to know which
+        of its hyperparameters refer to the length scales of the Matern kernel,
+        as other hyperparameters might be used for the warping portion. For this
+        reason, subclasses must pass in this list of indices into self.params
+        giving the length scale hyperparameters. E.g. ::
+
+            length_scales = self.params[self.length_scale_param_indices]
+
+    **kwargs
+        All keyword parameters are passed to :py:class:`~gptools.kernel.core.ChainRuleKernel`.
+    """
+    def __init__(self, num_dim, length_scale_param_indices, **kwargs):
+        if not len(length_scale_param_indices) == num_dim:
+            raise ValueError('length_scale_param_indices must be of length num_dim')
+        self.length_scale_param_indices = scipy.asarray(length_scale_param_indices)
+
+        super(WarpedMatern52Kernel, self).__init__(num_dim=num_dim, **kwargs)
 
     def __call__(self, Xi, Xj, ni, nj, hyper_deriv=None, symmetric=False):
+        if hyper_deriv is not None:
+            raise NotImplementedError("Hyperparameter derivatives have not been implemented!")
+        if scipy.any(scipy.sum(ni, axis=1) > 1) or scipy.any(scipy.sum(nj, axis=1) > 1):
+            raise NotImplementedError("WarpedMatern52Kernel only supports 0th and 1st order derivatives")
 
-        Xi = scipy.asarray(Xi, dtype=float)
-        Xj = scipy.asarray(Xj, dtype=float)
+        var = scipy.square(self.params[self.length_scale_param_indices], dtype=float)
 
-        wXi = scipy.empty_like(Xi)
-        wXj = scipy.empty_like(Xj)
-        for i in range(self.num_dim):
-            wXi[:, i] = self._warp_func(Xi[:, i], 0, *self._warp_params(i))
-            wXj[:, i] = self._warp_func(Xj[:, i], 0, *self._warp_params(i))
+        n_combined = scipy.asarray(scipy.hstack((ni, nj)), dtype=int)
+        n_combined_unique = unique_rows(n_combined)
 
-        k_term = self._kernel_func(wXi, wXj, ni, nj, *self._kernel_params())
-
-        warp_deriv = scipy.ones_like(k_term)
+        k = scipy.zeros(Xi.shape[0], dtype=float)
+        wXi = scipy.zeros(Xi.shape, dtype=float)
+        wXj = scipy.zeros(Xi.shape, dtype=float)
         for d in range(self.num_dim):
-            term_i = self._warp_func(Xi[:,d], ni[:,d], *self._warp_params(d))
-            term_j = self._warp_func(Xj[:,d], nj[:,d], *self._warp_params(d))
-            term_i[ni[:,d] == 0] = 1
-            term_j[nj[:,d] == 0] = 1
-            warp_deriv *= (term_i * term_j)
+            wXi[:, d] = self._warp_func(Xi[:, d], 0, d)
+            wXj[:, d] = self._warp_func(Xj[:, d], 0, d)
 
-        return self.params[0]**2 * k_term * warp_deriv
+        for n_combined_state in n_combined_unique:
+            idxs = (n_combined == n_combined_state).all(axis=1)
+            ni_idxs = scipy.asarray(ni[idxs], order='c', dtype=scipy.int32)
+            nj_idxs = scipy.asarray(nj[idxs], order='c', dtype=scipy.int32)
+            wXi_idxs = scipy.asarray(wXi[idxs], order='c', dtype=float)
+            wXj_idxs = scipy.asarray(wXj[idxs], order='c', dtype=float)
+            k[idxs] = _matern52(wXi_idxs, wXj_idxs, ni_idxs, nj_idxs, var)
+            if scipy.sum(n_combined_state) == 0:
+                continue
 
-    def _kernel_func(self, Xi, Xj, ni, nj, *kernel_params):
+            ni_state = n_combined_state[:self.num_dim]
+            nj_state = n_combined_state[self.num_dim:]
+            for d in range(self.num_dim):
+                if ni_state[d] > 0:
+                    k[idxs] *= self._warp_func(Xi[idxs, d], ni_idxs[:, d], d)
+                if nj_state[d] > 0:
+                    k[idxs] *= self._warp_func(Xj[idxs, d], nj_idxs[:, d], d)
+
+        return self.params[0]**2 * k
+
+    def _warp_func(self, x, n, d):
+        """The coordinate-warping function.
+
+        Parameters
+        ---------
+        x : array-like, dtype=float, shape=(M,)
+            This should be the `d`th column of Xi or Xj.
+        n : int
+            Derivative order for these observations
+        d : int
+            The index of the dimension that's being warped. Different dimensions
+            can be warped differently.
+        """
         raise NotImplementedError()
 
-    def _kernel_params(self):
-        raise NotImplementedError()
 
-    def _warp_func(self, Xi, ni, *warp_parms):
-        raise NotImplementedError()
+class BetaCDFWarpedMatern52Kernel(WarpedMatern52Kernel):
+    r"""Non-stationary BetaCDF-warped Matern 5/2
 
-    def _warp_params(self, dim):
-        raise NotImplementedError()
+    The BetaCDFWarpedMatern52Kernel kernel has the following hyperparameters,
+    always referenced in the order listed:
 
+    = =====  ====================================
+    0 sigma  prefactor
+    1 l1     length scale for the first dimension
+    2 alpha1 alpha warping parameter for first dimension
+    3 beta1  beta warping parameter for first dimension
+    4 l2    ...and so on for all dimensions
+    = ===== ===================================
 
-class Matern52KernelBetaCDF(WarpedKernel):
+    The kernel is defined as:
+
+    .. math::
+
+        k_M(x, x') = \sigma^2 \left(1 + \sqrt{5r^2} + \frac{5}{3}r^2\right) \exp(-\sqrt{5r^2}) \\
+        r^2 = \sum_{d=1}^D \frac{(w_d(x_d) - w_d(x'_d))^2}{l_d^2}
+
+    where ..math::
+
+        w_d(x) = BetaCDF(x, \alpha_d, \beta_d)
+
+    Some properties and applications of this kernel are described in Snoek et
+    al. [1].
+
+    Parameters
+    ----------
+    num_dim : int
+        Number of dimensions of the input data. Must be consistent with the `X`
+        and `Xstar` values passed to the :py:class:`~gptools.gaussian_process.GaussianProcess`
+        you wish to use the covariance kernel with.
+    **kwargs
+        All keyword parameters are passed to :py:class:`~gptools.kernel.core.Kernel`.
+
+    Raises
+    ------
+    ValueError
+        If `num_dim` is not a positive integer or the lengths of the input
+        vectors are inconsistent.
+    GPArgumentError
+        If `fixed_params` is passed but `initial_params` is not.
+
+    References
+    ----------
+    .. [1] J. Snoek, K. Swersky, R. Zemel, R. P. Adams, "Input Warping for
+       Bayesian Optimization of Non-stationary Functions" ICML (2014)
+    """
     def __init__(self, num_dim=1, **kwargs):
         param_names = [r'\sigma_f']
         for i in range(num_dim):
@@ -557,26 +662,16 @@ class Matern52KernelBetaCDF(WarpedKernel):
                 'alpha_%d' % (i+1,),
                 'beta_%d' % (i+1,)
             ])
+        length_scale_param_indices = [i for i, name in enumerate(param_names)
+            if name.startswith('l_')]
 
-        super(Matern52KernelBetaCDF, self).__init__(
-            num_dim=num_dim, num_params=len(param_names),
+        super(BetaCDFWarpedMatern52Kernel, self).__init__(
+            num_dim=num_dim,
+            length_scale_param_indices=length_scale_param_indices,
+            num_params=len(param_names),
             param_names=param_names, **kwargs)
 
-    def _kernel_func(self, Xi, Xj, ni, nj, l):
-        if scipy.any(scipy.sum(ni, axis=1) > 1) or scipy.any(scipy.sum(nj, axis=1) > 1):
-            raise ValueError("Matern52Kernel only supports 0th and 1st order derivatives")
-        var = scipy.square(l)
-        Xi = scipy.asarray(Xi, dtype=float, order='c')
-        Xj = scipy.asarray(Xj, dtype=float, order='c')
-        ni = scipy.array(ni, dtype=scipy.int32, order='c')
-        nj = scipy.array(nj, dtype=scipy.int32, order='c')
-        return _matern52(Xi, Xj, ni, nj, var)
-
-    def _kernel_params(self):
-        return (self.params[1::3], )
-
-    def _warp_func(self, x, n, alpha, beta):
+    def _warp_func(self, x, n, d):
+        alpha = self.params[2 + 3*d]
+        beta = self.params[3 + 3*d]
         return betacdf_warp(x, n, alpha, beta)
-
-    def _warp_params(self, dim):
-        return (self.params[2 + 3*dim], self.params[3 + 3*dim])
