@@ -11,13 +11,11 @@ def test_1():
     x = random.uniform(size=10)
     alpha = random.lognormal()
     beta = random.lognormal()
-    zeros = np.zeros(10)
-    ones = np.zeros(10)
 
-    result = betacdf_warp(x, zeros, alpha, beta)
+    result = betacdf_warp(x, 0, alpha, beta)
     assert result.shape == (10,)
 
-    derivs = betacdf_warp(x, ones, alpha, beta)
+    derivs = betacdf_warp(x, 1, alpha, beta)
     assert derivs.shape == (10,)
 
 
@@ -74,7 +72,7 @@ def test_5():
     x = random.uniform(size=(10, 1))
     n = np.zeros((10, 1))
 
-    k1 = Matern52KernelBetaCDF(num_dim=1)
+    k1 = BetaCDFWarpedMatern52Kernel(num_dim=1)
     k1.params = np.array([1, 1, 1, 1], dtype=float)
     k2 = Matern52Kernel(num_dim=1)
     k2.params = np.array([1, 1], dtype=float)
@@ -86,7 +84,7 @@ def test_5():
 def test_6():
     # finite-difference verification of Matern52KernelBetaCDF
     # derivatives in 1D
-    k1 = Matern52KernelBetaCDF(num_dim=1)
+    k1 = BetaCDFWarpedMatern52Kernel(num_dim=1)
     k1.params = np.array([1, 2, 3, 4], dtype=float)
     y = np.array([[0.2]])
 

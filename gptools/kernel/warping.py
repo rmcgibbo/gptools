@@ -317,9 +317,8 @@ def betacdf_warp(x, n, alpha, beta):
     ----------
     x : float or array-like of float
         Locations to evaluate length scale at. x must be between 0 and 1.
-    n : non-negative int or array-like of non-negative int
-        Derivative order to evaluate. Only first derivatives are supported.
-        The shape of `n` should match the shape of `x`.
+    n : int
+        Derivative order to evaluate.
     alpha : positive float
         Fist shape parameter for the Beta distribution.
     beta : positive float
@@ -327,30 +326,21 @@ def betacdf_warp(x, n, alpha, beta):
     """
     if scipy.any(scipy.logical_or(x > 1, x < 0)):
         raise ValueError('x must be between 0 and 1')
-    if scipy.any(scipy.logical_or(alpha <= 0, beta <=0)):
+    if alpha <= 0 or beta <=0:
         raise ValueError('alpha and beta must be positive')
-    if scipy.any(scipy.logical_or(n < 0, n > 1)):
-        raise NotImplementedError('only 0th and 1st derivatives are supported')
 
     x = scipy.array(x, ndmin=1, dtype=float, copy=False)
-    n = scipy.array(n, ndmin=1, dtype=int, copy=False)
-    alpha = scipy.array(alpha, ndmin=1, dtype=float, copy=False)
-    beta = scipy.array(alpha, ndmin=1, dtype=float, copy=False)
 
-    out = scipy.zeros_like(x)
-    mask0 = (n == 0)
-    mask1 = (n == 1)
-
-    # 0th-order derivatives. The Beta CDF
-    out[mask0] = scipy.special.betainc(alpha, beta, x[mask0])
-    
-    # 1st-order derivatives. The Beta PDF
-    # See scipy.stats._continuous_distns.py#L380
-    x1 = x[mask1]
-    out1 = scipy.special.xlog1py(beta-1.0, -x1)
-    out1 += scipy.special.xlogy(alpha-1.0, x1)
-    out1 -= scipy.special.betaln(alpha, beta)
-    out[mask1] = scipy.exp(out1)
+    if n == 0:
+        out = scipy.special.betainc(alpha, beta, x)
+    elif n == 1:
+        # See scipy.stats._continuous_distns.py#L380
+        out = scipy.special.xlog1py(beta-1.0, -x)
+        out += scipy.special.xlogy(alpha-1.0, x)
+        out -= scipy.special.betaln(alpha, beta)
+        scipy.exp(out, out=out)
+    else:
+        raise NotImplementedError('only 0th and 1st derivatives are supported')
 
     return out
 
